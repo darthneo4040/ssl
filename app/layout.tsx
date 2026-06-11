@@ -1,6 +1,8 @@
 import type { Metadata } from "next";
 import "./globals.css";
 import { Toaster } from "../components/ui/sonner"
+import { QueryProvider } from "../components/providers/query-provider"
+import { AuthProvider } from "../components/providers/auth-provider"
 
 export const metadata: Metadata = {
   title: "SSL-Vzla | Gestión de Seguridad Laboral",
@@ -15,7 +17,11 @@ export default function RootLayout({
   return (
     <html lang="es">
       <body className="antialiased">
-        {children}
+        <QueryProvider>
+          <AuthProvider>
+            {children}
+          </AuthProvider>
+        </QueryProvider>
         <Toaster />
       </body>
     </html>

@@ -2,14 +2,13 @@
 
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import { Textarea } from '@/components/ui/textarea' // Aunque no la usemos de inmediato, es útil tenerla
 import { toast } from 'sonner'
 import {
   ArrowLeft,
@@ -17,33 +16,19 @@ import {
   Loader2,
   ClipboardList
 } from 'lucide-react'
-import { createClient } from '@/lib/supabase/client'
-import { User } from '@supabase/supabase-js'
+import { useAuth } from '@/components/providers/auth-provider'
+import { useCreateRiskAssessment } from '@/hooks/useRiskAssessments'
 
 export default function NewRiskAssessmentPage() {
   const router = useRouter()
-  const [loading, setLoading] = useState(false)
-  const [user, setUser] = useState<User | null>(null)
-  const supabase = createClient()
+  const { user } = useAuth()
+  const createAssessmentMutation = useCreateRiskAssessment()
 
   // Form state
   const [formData, setFormData] = useState({
     area: '',
     task: ''
   })
-
-  useEffect(() => {
-    const fetchUser = async () => {
-      const { data: { user } } = await supabase.auth.getUser()
-      if (!user) {
-        toast.error('Debes iniciar sesión para crear una evaluación.')
-        router.push('/login')
-      } else {
-        setUser(user)
-      }
-    }
-    fetchUser()
-  }, [])
 
   const handleChange = (field: string, value: string) => {
     setFormData(prev => ({ ...prev, [field]: value }))
@@ -62,33 +47,23 @@ export default function NewRiskAssessmentPage() {
         return
     }
 
-    setLoading(true)
-
     try {
-      const { data, error } = await supabase
-        .from('risk_assessments')
-        .insert({
-          area: formData.area.trim(),
-          task: formData.task.trim(),
-          assessed_by: user.id,
-          // company_id se podría obtener del perfil del usuario si fuera necesario
-        })
-        .select()
-        .single() // Para obtener el objeto insertado
-
-      if (error) throw error
+      const data = await createAssessmentMutation.mutateAsync({
+        area: formData.area.trim(),
+        task: formData.task.trim(),
+        assessed_by: user.id,
+        company_id: '550e8400-e29b-41d4-a716-446655440000', // Demo company
+      })
 
       toast.success('✅ Evaluación de riesgo creada exitosamente.')
-      // Redirigir a la página de detalles para añadir riesgos específicos
       router.push(`/risk-assessment/${data.id}`)
-
-    } catch (error: any) {
-      toast.error('Error al guardar la evaluación: ' + error.message)
+    } catch (error) {
+      toast.error('Error al guardar la evaluación: ' + (error as Error).message)
       console.error(error)
-    } finally {
-      setLoading(false)
     }
   }
+
+  const loading = createAssessmentMutation.isPending
 
   return (
     <div className="p-6 max-w-4xl mx-auto">

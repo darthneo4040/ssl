@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useRef } from 'react'
 import { useRouter } from 'next/navigation'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
@@ -12,141 +12,87 @@ import { toast } from 'sonner'
 import { 
   ArrowLeft,
   Save,
-  Camera,
   MapPin,
   AlertTriangle,
-  Loader2
+  Loader2,
+  Upload,
+  X,
+  FileIcon,
+  ImageIcon
 } from 'lucide-react'
 import Link from 'next/link'
-import { createClient } from '@/lib/supabase/client'
+import { useAuth } from '@/components/providers/auth-provider'
+import { useCreateIncident } from '@/hooks/useIncidents'
+import { incidentsService } from '@/lib/services/incidents'
 
 export default function NewIncidentPage() {
   const router = useRouter()
-  const [loading, setLoading] = useState(false)
-  const [checkingAuth, setCheckingAuth] = useState(true)
-  const [user, setUser] = useState<any>(null)
-  const supabase = createClient()
+  const { user } = useAuth()
+  const createIncidentMutation = useCreateIncident()
   
   // Form state
   const [formData, setFormData] = useState({
     title: '',
     description: '',
     location: '',
-    severity: '',
-    type: '',
+    severity: 'medium',
+    type: 'accident',
     immediateAction: '',
     witnesses: ''
   })
 
-  useEffect(() => {
-    checkUser()
-  }, [])
+  const [evidenceFiles, setEvidenceFiles] = useState<File[]>([])
+  const fileInputRef = useRef<HTMLInputElement>(null)
 
-  const checkUser = async () => {
-    try {
-      // Obtener sesión actual
-      const { data: { session } } = await supabase.auth.getSession()
-      
-      if (!session) {
-        toast.error('Debes iniciar sesión')
-        router.push('/login')
-        return
-      }
-
-      setUser(session.user)
-      
-      // Verificar si el perfil existe
-      const { data: profile, error } = await supabase
-        .from('profiles')
-        .select('*')
-        .eq('id', session.user.id)
-        .single()
-
-      if (error || !profile) {
-        // Si no hay perfil, crearlo
-        const { error: insertError } = await supabase
-          .from('profiles')
-          .insert({
-            id: session.user.id,
-            company_id: '550e8400-e29b-41d4-a716-446655440000',
-            full_name: session.user.email?.split('@')[0] || 'Usuario',
-            role: 'inspector'
-          })
-        
-        if (insertError) {
-          console.error('Error creando perfil:', insertError)
-        }
-      }
-    } catch (error) {
-      console.error('Error verificando usuario:', error)
-      toast.error('Error de autenticación')
-      router.push('/login')
-    } finally {
-      setCheckingAuth(false)
+  const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files
+    if (files) {
+      setEvidenceFiles(prev => [...prev, ...Array.from(files)])
     }
+    if (fileInputRef.current) fileInputRef.current.value = ''
+  }
+
+  const removeFile = (index: number) => {
+    setEvidenceFiles(prev => prev.filter((_, i) => i !== index))
   }
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     
-    // Verificar sesión antes de guardar
-    const { data: { session } } = await supabase.auth.getSession()
-    
-    if (!session) {
+    if (!user) {
       toast.error('Tu sesión ha expirado. Por favor, inicia sesión nuevamente.')
       router.push('/login')
       return
     }
 
-    setLoading(true)
-
     try {
-      // Obtener el perfil actualizado
-      const { data: profile } = await supabase
-        .from('profiles')
-        .select('*')
-        .eq('id', session.user.id)
-        .single()
+      const incident = await createIncidentMutation.mutateAsync({
+        company_id: '550e8400-e29b-41d4-a716-446655440000',
+        reported_by: user.id,
+        title: formData.title.trim(),
+        description: formData.description.trim(),
+        location: formData.location.trim(),
+        severity: formData.severity as 'critical' | 'high' | 'medium' | 'low',
+        type: formData.type as 'accident' | 'near_miss' | 'unsafe_condition' | 'unsafe_act' | 'environmental',
+        immediate_action: formData.immediateAction.trim() || null,
+        witnesses: formData.witnesses.trim() || null,
+        status: 'open'
+      })
 
-      if (!profile) {
-        throw new Error('No se encontró el perfil del usuario')
-      }
-
-      // Guardar el incidente
-      const { data, error } = await supabase
-        .from('incidents')
-        .insert({
-          company_id: profile.company_id || '550e8400-e29b-41d4-a716-446655440000',
-          reported_by: session.user.id,
-          title: formData.title,
-          description: formData.description,
-          location: formData.location,
-          severity: formData.severity || 'medium',
-          type: formData.type || 'accident',
-          immediate_action: formData.immediateAction || null,
-          witnesses: formData.witnesses || null,
-          occurred_at: new Date().toISOString(),
-          status: 'open'
-        })
-        .select()
-
-      if (error) {
-        console.error('Error de Supabase:', error)
-        throw error
+      // Upload evidence files if any
+      if (evidenceFiles.length > 0) {
+        await Promise.all(
+          evidenceFiles.map(file =>
+            incidentsService.uploadEvidence(file, incident.id, user.id)
+          )
+        )
       }
 
       toast.success('✅ Incidente reportado exitosamente')
-      
-      // Pequeña espera antes de redirigir
-      setTimeout(() => {
-        router.push('/incidents')
-      }, 1000)
-      
-    } catch (error: any) {
-      console.error('Error completo:', error)
-      toast.error(error.message || 'Error al guardar el incidente')
-    } finally {
-      setLoading(false)
+      router.push('/incidents')
+    } catch (error) {
+      console.error('Error reporting incident:', error)
+      toast.error((error as Error).message || 'Error al guardar el incidente')
     }
   }
 
@@ -157,14 +103,7 @@ export default function NewIncidentPage() {
     }))
   }
 
-  // Mostrar loading mientras verifica autenticación
-  if (checkingAuth) {
-    return (
-      <div className="flex items-center justify-center min-h-screen">
-        <Loader2 className="h-8 w-8 animate-spin" />
-      </div>
-    )
-  }
+  const loading = createIncidentMutation.isPending
 
   return (
     <div className="p-6 max-w-4xl mx-auto">
@@ -314,6 +253,68 @@ export default function NewIncidentPage() {
                   disabled={loading}
                 />
               </div>
+            </CardContent>
+          </Card>
+
+          {/* Evidencia */}
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <Upload className="h-5 w-5" />
+                Evidencia
+              </CardTitle>
+              <CardDescription>
+                Fotos, documentos u otros archivos como evidencia del incidente
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div>
+                <Label>Archivos de Evidencia</Label>
+                <div className="mt-1 flex items-center gap-2">
+                  <Input
+                    ref={fileInputRef}
+                    type="file"
+                    multiple
+                    accept="image/*,.pdf,.doc,.docx,.mp4,.mov"
+                    onChange={handleFileSelect}
+                    disabled={loading}
+                    className="flex-1"
+                  />
+                </div>
+                <p className="text-xs text-muted-foreground mt-1">
+                  Formatos aceptados: imágenes, PDF, documentos, videos
+                </p>
+              </div>
+
+              {evidenceFiles.length > 0 && (
+                <div className="space-y-2">
+                  {evidenceFiles.map((file, index) => (
+                    <div key={index} className="flex items-center justify-between p-2 rounded-md bg-slate-50 border border-slate-200">
+                      <div className="flex items-center gap-2 min-w-0">
+                        {file.type.startsWith('image/') ? (
+                          <ImageIcon className="h-4 w-4 shrink-0 text-blue-500" />
+                        ) : (
+                          <FileIcon className="h-4 w-4 shrink-0 text-amber-500" />
+                        )}
+                        <span className="text-sm truncate">{file.name}</span>
+                        <span className="text-xs text-muted-foreground shrink-0">
+                          ({(file.size / 1024).toFixed(1)} KB)
+                        </span>
+                      </div>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon"
+                        className="h-6 w-6 shrink-0"
+                        onClick={() => removeFile(index)}
+                        disabled={loading}
+                      >
+                        <X className="h-3 w-3" />
+                      </Button>
+                    </div>
+                  ))}
+                </div>
+              )}
             </CardContent>
           </Card>
 

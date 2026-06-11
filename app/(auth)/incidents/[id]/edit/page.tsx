@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useParams, useRouter } from 'next/navigation'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
@@ -16,19 +16,27 @@ import {
   AlertTriangle,
   MapPin,
   Loader2,
-  AlertCircle
+  AlertCircle,
+  Upload,
+  X,
+  FileIcon,
+  ImageIcon
 } from 'lucide-react'
 import Link from 'next/link'
-import { createClient } from '@/lib/supabase/client'
+import { useIncident, useUpdateIncident } from '@/hooks/useIncidents'
+import { useAuth } from '@/components/providers/auth-provider'
+import { incidentsService } from '@/lib/services/incidents'
 
 export default function EditIncidentPage() {
   const params = useParams()
   const router = useRouter()
-  const [loading, setLoading] = useState(true)
-  const [saving, setSaving] = useState(false)
-  const [incident, setIncident] = useState<any>(null)
-  const supabase = createClient()
-  
+  const incidentId = params.id as string
+
+  const { data: incident, isLoading: loading, error } = useIncident(incidentId)
+  const updateMutation = useUpdateIncident(incidentId)
+  const { user } = useAuth()
+  const fileInputRef = useRef<HTMLInputElement>(null)
+
   // Form state
   const [formData, setFormData] = useState({
     title: '',
@@ -41,47 +49,35 @@ export default function EditIncidentPage() {
     witnesses: ''
   })
 
-  useEffect(() => {
-    if (params.id) {
-      loadIncident()
-    }
-  }, [params.id])
+  const [evidenceFiles, setEvidenceFiles] = useState<File[]>([])
 
-  const loadIncident = async () => {
-    try {
-      setLoading(true)
-      
-      const { data, error } = await supabase
-        .from('incidents')
-        .select('*')
-        .eq('id', params.id)
-        .single()
-
-      if (error) {
-        console.error('Error:', error)
-        toast.error('Error al cargar el incidente')
-        router.push('/incidents')
-      } else {
-        setIncident(data)
-        setFormData({
-          title: data.title || '',
-          description: data.description || '',
-          location: data.location || '',
-          severity: data.severity || '',
-          type: data.type || '',
-          status: data.status || '',
-          immediateAction: data.immediate_action || '',
-          witnesses: data.witnesses || ''
-        })
-      }
-    } catch (error) {
-      console.error('Error:', error)
-      toast.error('Error inesperado')
-      router.push('/incidents')
-    } finally {
-      setLoading(false)
+  const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files
+    if (files) {
+      setEvidenceFiles(prev => [...prev, ...Array.from(files)])
     }
+    if (fileInputRef.current) fileInputRef.current.value = ''
   }
+
+  const removeFile = (index: number) => {
+    setEvidenceFiles(prev => prev.filter((_, i) => i !== index))
+  }
+
+  // Sincronizar estado local con datos cargados
+  useEffect(() => {
+    if (incident) {
+      setFormData({
+        title: incident.title || '',
+        description: incident.description || '',
+        location: incident.location || '',
+        severity: incident.severity || 'medium',
+        type: incident.type || 'accident',
+        status: incident.status || 'open',
+        immediateAction: incident.immediate_action || '',
+        witnesses: incident.witnesses || ''
+      })
+    }
+  }, [incident])
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -91,38 +87,32 @@ export default function EditIncidentPage() {
       return
     }
 
-    setSaving(true)
-
     try {
-      const updateData = {
+      await updateMutation.mutateAsync({
         title: formData.title.trim(),
         description: formData.description.trim(),
         location: formData.location.trim(),
-        severity: formData.severity || 'medium',
-        type: formData.type || 'accident',
-        status: formData.status || 'open',
+        severity: formData.severity as 'critical' | 'high' | 'medium' | 'low',
+        type: formData.type as 'accident' | 'near_miss' | 'unsafe_condition' | 'unsafe_act' | 'environmental',
+        status: formData.status as 'open' | 'in_progress' | 'resolved' | 'closed',
         immediate_action: formData.immediateAction.trim() || null,
-        witnesses: formData.witnesses.trim() || null,
-        updated_at: new Date().toISOString()
+        witnesses: formData.witnesses.trim() || null
+      })
+
+      // Upload new evidence files
+      if (evidenceFiles.length > 0 && user) {
+        await Promise.all(
+          evidenceFiles.map(file =>
+            incidentsService.uploadEvidence(file, incidentId, user.id)
+          )
+        )
       }
 
-      const { error } = await supabase
-        .from('incidents')
-        .update(updateData)
-        .eq('id', params.id)
-
-      if (error) {
-        console.error('Error:', error)
-        toast.error(`Error: ${error.message}`)
-      } else {
-        toast.success('✅ Incidente actualizado exitosamente')
-        router.push(`/incidents/${params.id}`)
-      }
-    } catch (error: any) {
-      console.error('Error inesperado:', error)
-      toast.error('Error al actualizar')
-    } finally {
-      setSaving(false)
+      toast.success('✅ Incidente actualizado exitosamente')
+      router.push(`/incidents/${incidentId}`)
+    } catch (error) {
+      console.error('Error updating incident:', error)
+      toast.error('Error al actualizar el incidente: ' + (error as Error).message)
     }
   }
 
@@ -142,13 +132,13 @@ export default function EditIncidentPage() {
     )
   }
 
-  if (!incident) {
+  if (error || !incident) {
     return (
       <div className="p-6">
-        <Alert>
+        <Alert variant="destructive">
           <AlertCircle className="h-4 w-4" />
           <AlertDescription>
-            Incidente no encontrado
+            {error instanceof Error ? error.message : 'Incidente no encontrado'}
           </AlertDescription>
         </Alert>
         <Link href="/incidents">
@@ -158,11 +148,13 @@ export default function EditIncidentPage() {
     )
   }
 
+  const saving = updateMutation.isPending
+
   return (
     <div className="p-6 max-w-4xl mx-auto">
       {/* Header */}
       <div className="flex items-center gap-4 mb-6">
-        <Link href={`/incidents/${params.id}`}>
+        <Link href={`/incidents/${incidentId}`}>
           <Button variant="ghost" size="icon">
             <ArrowLeft className="h-5 w-5" />
           </Button>
@@ -334,9 +326,68 @@ export default function EditIncidentPage() {
             </CardContent>
           </Card>
 
+          {/* Evidencia */}
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <Upload className="h-5 w-5" />
+                Agregar Evidencia
+              </CardTitle>
+              <CardDescription>
+                Sube nuevas fotos o documentos como evidencia adicional
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div>
+                <Label>Archivos</Label>
+                <div className="mt-1 flex items-center gap-2">
+                  <Input
+                    ref={fileInputRef}
+                    type="file"
+                    multiple
+                    accept="image/*,.pdf,.doc,.docx,.mp4,.mov"
+                    onChange={handleFileSelect}
+                    disabled={saving}
+                    className="flex-1"
+                  />
+                </div>
+              </div>
+
+              {evidenceFiles.length > 0 && (
+                <div className="space-y-2">
+                  {evidenceFiles.map((file, index) => (
+                    <div key={index} className="flex items-center justify-between p-2 rounded-md bg-slate-50 border border-slate-200">
+                      <div className="flex items-center gap-2 min-w-0">
+                        {file.type.startsWith('image/') ? (
+                          <ImageIcon className="h-4 w-4 shrink-0 text-blue-500" />
+                        ) : (
+                          <FileIcon className="h-4 w-4 shrink-0 text-amber-500" />
+                        )}
+                        <span className="text-sm truncate">{file.name}</span>
+                        <span className="text-xs text-muted-foreground shrink-0">
+                          ({(file.size / 1024).toFixed(1)} KB)
+                        </span>
+                      </div>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon"
+                        className="h-6 w-6 shrink-0"
+                        onClick={() => removeFile(index)}
+                        disabled={saving}
+                      >
+                        <X className="h-3 w-3" />
+                      </Button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </CardContent>
+          </Card>
+
           {/* Actions */}
           <div className="flex gap-3 justify-end">
-            <Link href={`/incidents/${params.id}`}>
+            <Link href={`/incidents/${incidentId}`}>
               <Button type="button" variant="outline" disabled={saving}>
                 Cancelar
               </Button>

@@ -2,7 +2,7 @@
 
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Badge } from '@/components/ui/badge'
@@ -10,54 +10,15 @@ import {
   BookOpen,
   Search,
   Loader2,
-  AlertCircle
+  AlertCircle,
+  Scale
 } from 'lucide-react'
-import { createClient } from '@/lib/supabase/client'
 import { Alert, AlertDescription } from '@/components/ui/alert'
-
-// Define el tipo para una legislación individual
-type Legislation = {
-  id: string
-  category: string
-  title: string
-  summary: string | null
-  tags: string[] | null
-}
+import { useLegislation } from '@/hooks/useLegislation'
 
 export default function LegislacionPage() {
-  const [legislations, setLegislations] = useState<Legislation[]>([])
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState<string | null>(null)
+  const { data: legislations = [], isLoading: loading, error } = useLegislation()
   const [searchTerm, setSearchTerm] = useState('')
-  const supabase = createClient()
-
-  useEffect(() => {
-    loadLegislations()
-  }, [])
-
-  const loadLegislations = async () => {
-    try {
-      setLoading(true)
-      setError(null)
-
-      const { data, error: fetchError } = await supabase
-        .from('legislations')
-        .select('id, category, title, summary, tags')
-        .order('category', { ascending: true })
-        .order('title', { ascending: true })
-
-      if (fetchError) {
-        throw fetchError
-      }
-
-      setLegislations(data || [])
-    } catch (err: any) {
-      setError('No se pudo cargar la legislación. Inténtalo de nuevo.')
-      console.error('Error loading legislations:', err)
-    } finally {
-      setLoading(false)
-    }
-  }
 
   const filteredLegislations = legislations.filter(leg =>
     leg.title.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -66,75 +27,105 @@ export default function LegislacionPage() {
   )
 
   return (
-    <div className="p-6 max-w-7xl mx-auto">
-      {/* Header */}
-      <div className="flex justify-between items-center mb-6">
-        <div>
-          <h1 className="text-2xl font-bold text-gray-900">
-            Base de Conocimiento Legal
-          </h1>
-          <p className="text-muted-foreground mt-1">
-            Consulta leyes, normativas y reglamentos de SSL
-          </p>
+    <div className="min-h-screen bg-gray-50/50 pb-12">
+      <div className="p-6 max-w-7xl mx-auto space-y-6">
+        
+        {/* Header */}
+        <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 border-b border-gray-200/80 pb-6">
+          <div>
+            <h1 className="text-3xl font-extrabold text-gray-900 tracking-tight">
+              Base de Conocimiento Legal
+            </h1>
+            <p className="text-muted-foreground mt-1 text-sm md:text-base">
+              Consulta leyes nacionales, normativas técnicas COVENIN y reglamentos de LOPCYMAT vigentes.
+            </p>
+          </div>
         </div>
-      </div>
 
-      {/* Search Bar */}
-      <div className="relative mb-6 max-w-md">
-        <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-        <Input
-          placeholder="Buscar por título, categoría o palabra clave..."
-          className="pl-10"
-          value={searchTerm}
-          onChange={(e) => setSearchTerm(e.target.value)}
-        />
-      </div>
-
-      {/* Contenido */}
-      {loading ? (
-        <div className="flex justify-center items-center py-10">
-          <Loader2 className="h-8 w-8 animate-spin text-primary" />
+        {/* Search Bar */}
+        <div className="relative max-w-md shadow-xs rounded-xl overflow-hidden">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4.5 w-4.5 text-slate-400" />
+          <Input
+            placeholder="Buscar por título, categoría o palabra clave..."
+            className="pl-10 pr-4 py-6 bg-white border-slate-200/80 focus:border-blue-600 rounded-xl text-xs sm:text-sm placeholder:text-slate-400"
+            value={searchTerm}
+            onChange={(e) => setSearchTerm(e.target.value)}
+          />
         </div>
-      ) : error ? (
-        <Alert variant="destructive">
-          <AlertCircle className="h-4 w-4" />
-          <AlertDescription>{error}</AlertDescription>
-        </Alert>
-      ) : (
-        <div className="space-y-4">
-          {filteredLegislations.length > 0 ? (
-            filteredLegislations.map((leg) => (
-              <Card key={leg.id} className="hover:shadow-md transition-shadow">
-                <CardHeader>
-                  <CardTitle className="text-lg flex items-center gap-2">
-                    <BookOpen className="h-5 w-5 text-primary" />
-                    {leg.title}
-                  </CardTitle>
-                  <CardDescription>
-                    <Badge variant="secondary">{leg.category}</Badge>
-                  </CardDescription>
-                </CardHeader>
-                <CardContent>
-                  <p className="text-sm text-muted-foreground line-clamp-3">
-                    {leg.summary || 'No hay resumen disponible.'}
-                  </p>
-                  {leg.tags && leg.tags.length > 0 && (
-                    <div className="mt-3 flex flex-wrap gap-2">
-                      {leg.tags.map(tag => (
-                        <Badge key={tag} variant="outline">{tag}</Badge>
-                      ))}
+
+        {/* Contenido */}
+        {loading ? (
+          <div className="flex flex-col items-center justify-center min-h-[400px]">
+            <Loader2 className="h-8 w-8 animate-spin text-blue-600 mb-4" />
+            <p className="text-muted-foreground text-sm font-medium">Cargando base legal...</p>
+          </div>
+        ) : error ? (
+          <Alert variant="destructive">
+            <AlertCircle className="h-4 w-4" />
+            <AlertDescription>
+              {error instanceof Error ? error.message : 'No se pudo cargar la legislación.'}
+            </AlertDescription>
+          </Alert>
+        ) : (
+          <div className="space-y-4">
+            {filteredLegislations.length > 0 ? (
+              filteredLegislations.map((leg) => (
+                <Card key={leg.id} className="hover:shadow-md transition-all border-slate-200/60 bg-gradient-to-br from-white to-slate-50/50 rounded-xl overflow-hidden group">
+                  <CardHeader className="pb-3 flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-100 bg-slate-50/20">
+                    <div className="flex items-center gap-3">
+                      <div className="h-9 w-9 rounded-lg bg-indigo-50 border border-indigo-100 flex items-center justify-center text-indigo-600 shrink-0 group-hover:bg-indigo-100 transition-colors">
+                        <BookOpen className="h-5 w-5" />
+                      </div>
+                      <div>
+                        <CardTitle className="text-base font-bold text-slate-800 group-hover:text-blue-600 transition-colors">
+                          {leg.title}
+                        </CardTitle>
+                        <p className="text-[10px] text-muted-foreground mt-0.5">Identificador legal / Norma técnica</p>
+                      </div>
                     </div>
-                  )}
-                </CardContent>
+                    <Badge variant="outline" className="text-[10px] font-bold py-0.5 px-2 bg-blue-50 text-blue-700 border-blue-100 self-start sm:self-center">
+                      {leg.category}
+                    </Badge>
+                  </CardHeader>
+                  <CardContent className="pt-4 space-y-4">
+                    <p className="text-xs sm:text-sm text-slate-600 leading-relaxed font-medium">
+                      {leg.summary || 'No hay resumen disponible.'}
+                    </p>
+                    {leg.full_content && (
+                      <div className="p-3 bg-slate-50 rounded-lg border border-slate-100 text-xs text-slate-500 font-mono leading-relaxed whitespace-pre-wrap max-h-40 overflow-y-auto">
+                        {leg.full_content}
+                      </div>
+                    )}
+                    {leg.tags && leg.tags.length > 0 && (
+                      <div className="flex flex-wrap gap-1.5 pt-2 border-t border-slate-100">
+                        {leg.tags.map(tag => (
+                          <Badge key={tag} variant="outline" className="text-[9px] font-semibold bg-white border-slate-200 text-slate-500 rounded-full py-0 px-2 uppercase">
+                            #{tag}
+                          </Badge>
+                        ))}
+                      </div>
+                    )}
+                  </CardContent>
+                </Card>
+              ))
+            ) : (
+              <Card className="p-12 text-center border-slate-200/60 bg-white">
+                <div className="max-w-md mx-auto space-y-3">
+                  <div className="h-10 w-10 rounded-full bg-slate-50 border border-slate-200 flex items-center justify-center mx-auto text-slate-400">
+                    <Scale className="h-5 w-5" />
+                  </div>
+                  <div className="space-y-1">
+                    <h3 className="text-base font-bold text-slate-700">Sin coincidencia jurídica</h3>
+                    <p className="text-muted-foreground text-xs">
+                      No se encontraron resultados para &quot;<span className="font-semibold text-slate-600">{searchTerm}</span>&quot; en la base de datos de LOPCYMAT/COVENIN.
+                    </p>
+                  </div>
+                </div>
               </Card>
-            ))
-          ) : (
-            <div className="text-center py-10">
-              <p className="text-muted-foreground">No se encontraron resultados para "{searchTerm}"</p>
-            </div>
-          )}
-        </div>
-      )}
+            )}
+          </div>
+        )}
+      </div>
     </div>
   )
 }

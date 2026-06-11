@@ -2,7 +2,7 @@
 
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
-import { Button } from '../../components/ui/button'
+import { Button } from '@/components/ui/button'
 import { 
   LayoutDashboard, 
   AlertTriangle, 
@@ -14,9 +14,18 @@ import {
   Bell,
   BookOpen,
   ClipboardList,
+  User as UserIcon,
+  BarChart3,
+  GraduationCap,
+  Users,
+  Settings,
+  Bot,
 } from 'lucide-react'
 import { useState } from 'react'
-import { cn } from '../../lib/utils'
+import { cn } from '@/lib/utils'
+import { useAuth } from '@/components/providers/auth-provider'
+import { useQuery } from '@tanstack/react-query'
+import { authService } from '@/lib/services/auth'
 
 export default function AuthLayout({
   children,
@@ -25,6 +34,14 @@ export default function AuthLayout({
 }) {
   const pathname = usePathname()
   const [sidebarOpen, setSidebarOpen] = useState(false)
+  const { user, signOut } = useAuth()
+
+  // Consultar perfil de usuario para mostrar su nombre
+  const { data: profile } = useQuery({
+    queryKey: ['profile', user?.id],
+    queryFn: () => user ? authService.getProfile(user.id) : null,
+    enabled: !!user,
+  })
 
   const navigation = [
     { name: 'Dashboard', href: '/dashboard', icon: LayoutDashboard },
@@ -32,6 +49,11 @@ export default function AuthLayout({
     { name: 'Evaluación de Riesgos', href: '/risk-assessment', icon: ClipboardList },
     { name: 'Legislación', href: '/legislacion', icon: BookOpen },
     { name: 'Documentos', href: '/documents', icon: FileText },
+    { name: 'RRHH', href: '/employees', icon: Users },
+    { name: 'Capacitaciones', href: '/training', icon: GraduationCap },
+    { name: 'Reportes y Analítica', href: '/reports', icon: BarChart3 },
+    { name: 'Asistente IA', href: '/assistant', icon: Bot },
+    { name: 'Configuración', href: '/settings', icon: Settings },
   ]
 
   return (
@@ -104,7 +126,7 @@ export default function AuthLayout({
             })}
           </nav>
           <div className="p-3 border-t">
-            <Button variant="ghost" className="w-full justify-start">
+            <Button variant="ghost" className="w-full justify-start text-red-600 hover:text-red-700 hover:bg-red-50" onClick={signOut}>
               <LogOut className="h-5 w-5 mr-3" />
               Cerrar Sesión
             </Button>
@@ -142,6 +164,19 @@ export default function AuthLayout({
               <Button variant="ghost" size="icon">
                 <Bell className="h-5 w-5" />
               </Button>
+              <div className="flex items-center gap-2 pl-2 border-l">
+                <div className="h-8 w-8 rounded-full bg-slate-100 flex items-center justify-center">
+                  <UserIcon className="h-4 w-4 text-slate-600" />
+                </div>
+                <div className="hidden sm:block text-left">
+                  <p className="text-xs font-semibold text-gray-700 line-clamp-1">
+                    {profile?.full_name || user?.email?.split('@')[0] || 'Inspector'}
+                  </p>
+                  <p className="text-[10px] text-gray-500 capitalize">
+                    {profile?.role || 'Inspector'}
+                  </p>
+                </div>
+              </div>
             </div>
           </div>
         </div>

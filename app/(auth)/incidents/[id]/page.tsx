@@ -1,10 +1,11 @@
 'use client'
 
-import { useEffect, useState } from 'react'
-import { useParams, useRouter } from 'next/navigation'
+import { useState, useEffect, useRef } from 'react'
+import { useParams } from 'next/navigation'
 import Link from 'next/link'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
 import { Badge } from '@/components/ui/badge'
 import { Separator } from '@/components/ui/separator'
 import { Alert, AlertDescription } from '@/components/ui/alert'
@@ -27,81 +28,80 @@ import {
   CheckCircle,
   AlertCircle,
   Loader2,
-  Save
+  Save,
+  Upload,
+  ImageIcon,
+  FileIcon,
+  Download,
+  Trash2
 } from 'lucide-react'
-import { createClient } from '@/lib/supabase/client'
+import { useIncident, useUpdateIncident, useUploadEvidence, useDeleteEvidence } from '@/hooks/useIncidents'
+import { useAuth } from '@/components/providers/auth-provider'
 import { toast } from 'sonner'
 
 export default function IncidentDetailPage() {
   const params = useParams()
-  const router = useRouter()
-  const [incident, setIncident] = useState<any>(null)
-  const [loading, setLoading] = useState(true)
-  const [updating, setUpdating] = useState(false)
+  const incidentId = params.id as string
+
+  const { data: incident, isLoading: loading, error } = useIncident(incidentId)
+  const updateMutation = useUpdateIncident(incidentId)
+  const uploadMutation = useUploadEvidence(incidentId)
+  const deleteMutation = useDeleteEvidence(incidentId)
+  const { user } = useAuth()
   const [newStatus, setNewStatus] = useState('')
-  const supabase = createClient()
+  const fileInputRef = useRef<HTMLInputElement>(null)
 
-  useEffect(() => {
-    if (params.id) {
-      loadIncident()
-    }
-  }, [params.id])
+  const handleUploadEvidence = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files
+    if (!files || !user) return
 
-  const loadIncident = async () => {
     try {
-      setLoading(true)
-      
-      const { data, error } = await supabase
-        .from('incidents')
-        .select(`
-          *,
-          profiles!incidents_reported_by_fkey (
-            full_name,
-            role
-          )
-        `)
-        .eq('id', params.id)
-        .single()
+      await Promise.all(
+        Array.from(files).map(file =>
+          uploadMutation.mutateAsync({ file, userId: user.id })
+        )
+      )
+      toast.success('Evidencia subida exitosamente')
+    } catch (err) {
+      toast.error('Error al subir evidencia: ' + (err as Error).message)
+    }
+    if (fileInputRef.current) fileInputRef.current.value = ''
+  }
 
-      if (error) {
-        console.error('Error:', error)
-        toast.error('Error al cargar el incidente')
-        router.push('/incidents')
-      } else {
-        setIncident(data)
-        setNewStatus(data.status)
-      }
-    } catch (error) {
-      console.error('Error:', error)
-      toast.error('Error inesperado')
-    } finally {
-      setLoading(false)
+  const handleDeleteEvidence = async (evidenceId: string) => {
+    try {
+      await deleteMutation.mutateAsync(evidenceId)
+      toast.success('Evidencia eliminada')
+    } catch (err) {
+      toast.error('Error al eliminar: ' + (err as Error).message)
     }
   }
+
+  const getFileIcon = (fileType: string) => {
+    switch (fileType) {
+      case 'image': return <ImageIcon className="h-6 w-6 text-blue-500" />
+      case 'pdf': return <FileIcon className="h-6 w-6 text-red-500" />
+      case 'video': return <FileIcon className="h-6 w-6 text-purple-500" />
+      default: return <FileIcon className="h-6 w-6 text-gray-500" />
+    }
+  }
+
+  // Sincronizar el estado local cuando se carguen los datos
+  useEffect(() => {
+    if (incident) {
+      setNewStatus(incident.status)
+    }
+  }, [incident])
 
   const handleStatusChange = async () => {
     if (!incident || newStatus === incident.status) return
 
-    setUpdating(true)
     try {
-      const { error } = await supabase
-        .from('incidents')
-        .update({ 
-          status: newStatus,
-          updated_at: new Date().toISOString()
-        })
-        .eq('id', incident.id)
-
-      if (error) {
-        toast.error('Error al actualizar el estado')
-      } else {
-        toast.success('Estado actualizado correctamente')
-        setIncident({ ...incident, status: newStatus })
-      }
+      await updateMutation.mutateAsync({ status: newStatus as 'open' | 'in_progress' | 'resolved' | 'closed' })
+      toast.success('Estado actualizado correctamente')
     } catch (error) {
-      toast.error('Error inesperado')
-    } finally {
-      setUpdating(false)
+      console.error(error)
+      toast.error('Error al actualizar el estado: ' + (error as Error).message)
     }
   }
 
@@ -141,13 +141,13 @@ export default function IncidentDetailPage() {
     )
   }
 
-  if (!incident) {
+  if (error || !incident) {
     return (
       <div className="p-6">
-        <Alert>
+        <Alert variant="destructive">
           <AlertCircle className="h-4 w-4" />
           <AlertDescription>
-            Incidente no encontrado
+            {error instanceof Error ? error.message : 'Incidente no encontrado o no disponible.'}
           </AlertDescription>
         </Alert>
         <Link href="/incidents">
@@ -156,6 +156,8 @@ export default function IncidentDetailPage() {
       </div>
     )
   }
+
+  const updating = updateMutation.isPending
 
   return (
     <div className="p-6 max-w-5xl mx-auto">
@@ -185,9 +187,8 @@ export default function IncidentDetailPage() {
       </div>
 
       <div className="grid gap-6 md:grid-cols-3">
-        {/* Información Principal - 2 columnas */}
+        {/* Información Principal */}
         <div className="md:col-span-2 space-y-6">
-          {/* Información Básica */}
           <Card>
             <CardHeader>
               <CardTitle className="flex items-center justify-between">
@@ -197,8 +198,8 @@ export default function IncidentDetailPage() {
                 </span>
                 <div className="flex items-center gap-2">
                   {getStatusIcon(incident.status)}
-                  <Badge className={getSeverityColor(incident.severity)}>
-                    {incident.severity?.toUpperCase()}
+                  <Badge className={getSeverityColor(incident.severity || 'medium')}>
+                    {(incident.severity || 'medium').toUpperCase()}
                   </Badge>
                 </div>
               </CardTitle>
@@ -224,7 +225,7 @@ export default function IncidentDetailPage() {
                 </div>
                 <div>
                   <p className="text-muted-foreground mb-1">Severidad</p>
-                  <Badge className={getSeverityColor(incident.severity)}>
+                  <Badge className={getSeverityColor(incident.severity || 'medium')}>
                     {incident.severity === 'critical' && 'Crítico'}
                     {incident.severity === 'high' && 'Alto'}
                     {incident.severity === 'medium' && 'Medio'}
@@ -264,9 +265,86 @@ export default function IncidentDetailPage() {
               )}
             </CardContent>
           </Card>
+
+          {/* Evidencia */}
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <Upload className="h-5 w-5" />
+                Evidencia
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="flex items-center gap-2">
+                <Input
+                  ref={fileInputRef}
+                  type="file"
+                  multiple
+                  accept="image/*,.pdf,.doc,.docx,.mp4,.mov"
+                  onChange={handleUploadEvidence}
+                  className="flex-1"
+                />
+              </div>
+
+              {(!incident.incident_evidence || incident.incident_evidence.length === 0) ? (
+                <p className="text-sm text-muted-foreground text-center py-4">
+                  No hay evidencia adjunta
+                </p>
+              ) : (
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+                  {incident.incident_evidence.map((evidence) => (
+                    <div
+                      key={evidence.id}
+                      className="relative group p-3 rounded-lg border border-slate-200 bg-slate-50 hover:bg-slate-100 transition-colors"
+                    >
+                      <div className="flex flex-col items-center gap-2">
+                        {evidence.file_type === 'image' ? (
+                          <a href={evidence.file_url} target="_blank" rel="noopener noreferrer" className="block">
+                            <img
+                              src={evidence.file_url}
+                              alt={evidence.file_name}
+                              className="h-20 w-20 object-cover rounded-md"
+                            />
+                          </a>
+                        ) : (
+                          <a href={evidence.file_url} target="_blank" rel="noopener noreferrer" className="flex flex-col items-center gap-1">
+                            {getFileIcon(evidence.file_type)}
+                            <span className="text-[10px] text-muted-foreground text-center line-clamp-2">
+                              {evidence.file_name}
+                            </span>
+                          </a>
+                        )}
+                        <div className="flex gap-1">
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-6 w-6"
+                            asChild
+                          >
+                            <a href={evidence.file_url} target="_blank" rel="noopener noreferrer">
+                              <Download className="h-3 w-3" />
+                            </a>
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-6 w-6 text-red-500 hover:text-red-700"
+                            onClick={() => handleDeleteEvidence(evidence.id)}
+                            disabled={deleteMutation.isPending}
+                          >
+                            <Trash2 className="h-3 w-3" />
+                          </Button>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </CardContent>
+          </Card>
         </div>
 
-        {/* Sidebar - 1 columna */}
+        {/* Sidebar */}
         <div className="space-y-6">
           {/* Estado y Acciones */}
           <Card>
